@@ -47,7 +47,7 @@ fn startup(
     let radius = 0.1;
     let arm_upper_len = 2.;
     let arm_lower_len = 2.5;
-    let torso_len = 4.;
+    let spine_len = 4.;
     let leg_upper_len = 3.;
     let leg_lower_len = 3.1;
     macro_rules! make_part {
@@ -59,39 +59,86 @@ fn startup(
             ))
         };
     }
+    macro_rules! make_part_x {
+        ($length:expr) => {
+            commands.spawn((
+                RigidBody::Dynamic,
+                Collider::capsule_x(($length/2.) - (radius), radius),
+            ))
+        };
+    }
 
 
     {//testing
-        let seg_len = 0.5;
-        let root = make_part!(seg_len)
-            .insert(RigidBody::Fixed)
-            .id();
-        let mut prev = root;
-        let joint = *SphericalJointBuilder::new()
-            .local_anchor1(Vec3::Y * seg_len/2.)
-            .local_anchor2(Vec3::Y * -seg_len/2.)
-            .motor(JointAxis::AngX, 0., motor_vel, 1., 0.)
-            .motor(JointAxis::AngY, 0., motor_vel, 1., 0.)
-            .motor(JointAxis::AngZ, 0., motor_vel, 1., 0.)
-            .build()
-            .set_contacts_enabled(false);
-        let mut branchoff_seg = None;
-        for i in 0..5 {
-            let segment = make_part!(seg_len)
-                .insert(MultibodyJoint::new(prev, joint.into()))
+        let spine_root;
+        let spine_end;
+        let spine_seg_len = spine_len/6.;
+        {//spine
+            spine_root = make_part!(spine_seg_len)
+                .insert(RigidBody::Fixed)
+                .insert(TransformBundle::from_transform(Transform::from_xyz(0., 5., 0.)))
                 .id();
-            prev = segment;
-
-            if i == 1 {
-                branchoff_seg = Some(segment);
+            let mut prev = spine_root;
+            let joint = *SphericalJointBuilder::new()
+                .local_anchor1(Vec3::Y * spine_seg_len/2.)
+                .local_anchor2(Vec3::Y * -spine_seg_len/2.)
+                .motor(JointAxis::AngX, 0., motor_vel, 1., 0.)
+                .motor(JointAxis::AngY, 0., motor_vel, 1., 0.)
+                .motor(JointAxis::AngZ, 0., motor_vel, 1., 0.)
+                .build()
+                .set_contacts_enabled(false);
+            for i in 0..5 {
+                let segment = make_part!(spine_seg_len)
+                    .insert(MultibodyJoint::new(prev, joint.into()))
+                    .id();
+                prev = segment;
             }
+            spine_end = prev;
         }
 
-        let branchoff_seg = branchoff_seg.unwrap();
-        let shld_x_j = RevoluteJointBuilder::new(Vec3::X)
-            .local_anchor1(Vec3::Y * (torso_len/2.))
-            .limits([-150f32.to_radians(), 60f32.to_radians()])
-            .motor(0., motor_vel, 1., 0.0);
+        {//right arm
+            let shld_x_j = RevoluteJointBuilder::new(Vec3::X)
+                .local_anchor1(Vec3::Y * (spine_seg_len/2.))
+                .limits([-150f32.to_radians(), 60f32.to_radians()])
+                .motor(0., motor_vel, 1., 0.0);
+            let shld_y_j = RevoluteJointBuilder::new(Vec3::Y)
+                .limits([-90f32.to_radians(), 90f32.to_radians()])
+                .motor(0., motor_vel, 1., 0.0);
+            let shld_z_j = RevoluteJointBuilder::new(Vec3::Z)
+                .local_anchor2(Vec3::X * (-arm_upper_len/2.))
+                .limits([-90f32.to_radians(), 90f32.to_radians()])
+                .motor(0., motor_vel, 1., 0.0);
+
+            let elb_x_j = *RevoluteJointBuilder::new(Vec3::X)
+                .local_anchor1(Vec3::X * (arm_upper_len/2.))
+                .limits([0., 45f32.to_radians()])
+                .motor(0., motor_vel, 1., 0.0)
+                .build()
+                .set_contacts_enabled(false);
+            let elb_y_j = RevoluteJointBuilder::new(Vec3::Y)
+                .local_anchor2(Vec3::X * (-arm_lower_len/2.))
+                .limits([0., 180f32.to_radians()])
+                .motor(0., motor_vel, 1., 0.0);
+
+            let shld_x = commands.spawn(RigidBody::Fixed) //temporarily fixed
+                .insert(TransformBundle::from_transform(Transform::from_xyz(1., 5., 0.)))
+                .id();
+            let shld_y = commands.spawn(RigidBody::Dynamic)
+                .insert(MultibodyJoint::new(shld_x, shld_y_j.into()))
+                .id();
+            let arm_r_upper = make_part_x!(arm_upper_len)
+                .insert(MultibodyJoint::new(shld_y, shld_z_j.into()))
+                .id();
+            
+            let elb_x = commands.spawn(RigidBody::Dynamic)
+                .insert(MultibodyJoint::new(arm_r_upper, elb_x_j.into()))
+                .insert(Collider::ball(radius))
+                .id();
+            let arm_r_lower = make_part_x!(arm_lower_len)
+                .insert(MultibodyJoint::new(elb_x, elb_y_j.into()))
+                .id();
+        }
+
         //todo: create a branch multibody separately and connect its root to the main multibody
     }
 
@@ -102,7 +149,7 @@ fn startup(
         let torso = commands.spawn((
             TransformBundle::from_transform(Transform::from_xyz(0., 5., 0.)),
             RigidBody::Fixed,
-            Collider::capsule_y((torso_len/2.) - (radius), radius),
+            Collider::capsule_y((spine_len/2.) - (radius), radius),
             CollisionGroups {
                 memberships: Group::GROUP_1,
                 filters: Group::GROUP_2,
@@ -116,7 +163,7 @@ fn startup(
 
 
         let shld_x_j = RevoluteJointBuilder::new(Vec3::X)
-            .local_anchor1(Vec3::Y * (torso_len/2.))
+            .local_anchor1(Vec3::Y * (spine_len/2.))
             .limits([-150f32.to_radians(), 60f32.to_radians()])
             .motor(0., motor_vel, 1., 0.0);
         let shld_y_j = RevoluteJointBuilder::new(Vec3::Y)
