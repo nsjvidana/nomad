@@ -42,24 +42,62 @@ fn startup(
         Collider::cuboid(10., 0.1, 10.),
     ));
 
+    
+    let motor_vel = 90f32.to_radians();
+    let radius = 0.1;
+    let arm_upper_len = 2.;
+    let arm_lower_len = 2.5;
+    let torso_len = 4.;
+    let leg_upper_len = 3.;
+    let leg_lower_len = 3.1;
+    macro_rules! make_part {
+        ($length:expr) => {
+            commands.spawn((
+                TransformBundle::from_transform(Transform::from_xyz(0., 5., 0.)),
+                RigidBody::Dynamic,
+                Collider::capsule_y(($length/2.) - (radius), radius),
+            ))
+        };
+    }
+
+
+    {//testing
+        let seg_len = 0.5;
+        let root = make_part!(seg_len)
+            .insert(RigidBody::Fixed)
+            .id();
+        let mut prev = root;
+        let joint = *SphericalJointBuilder::new()
+            .local_anchor1(Vec3::Y * seg_len/2.)
+            .local_anchor2(Vec3::Y * -seg_len/2.)
+            .motor(JointAxis::AngX, 0., motor_vel, 1., 0.)
+            .motor(JointAxis::AngY, 0., motor_vel, 1., 0.)
+            .motor(JointAxis::AngZ, 0., motor_vel, 1., 0.)
+            .build()
+            .set_contacts_enabled(false);
+        let mut branchoff_seg = None;
+        for i in 0..5 {
+            let segment = make_part!(seg_len)
+                .insert(MultibodyJoint::new(prev, joint.into()))
+                .id();
+            prev = segment;
+
+            if i == 1 {
+                branchoff_seg = Some(segment);
+            }
+        }
+
+        let branchoff_seg = branchoff_seg.unwrap();
+        let shld_x_j = RevoluteJointBuilder::new(Vec3::X)
+            .local_anchor1(Vec3::Y * (torso_len/2.))
+            .limits([-150f32.to_radians(), 60f32.to_radians()])
+            .motor(0., motor_vel, 1., 0.0);
+        //todo: create a branch multibody separately and connect its root to the main multibody
+    }
+
+    return;
 
     {//player
-        let radius = 0.1;
-        let arm_upper_len = 2.;
-        let arm_lower_len = 2.5;
-        let torso_len = 4.;
-        let leg_upper_len = 3.;
-        let leg_lower_len = 3.1;
-
-        macro_rules! make_part {
-            ($length:expr) => {
-                commands.spawn((
-                    TransformBundle::from_transform(Transform::from_xyz(0., 5., 0.)),
-                    RigidBody::Dynamic,
-                    Collider::capsule_y(($length/2.) - (radius), radius),
-                ))
-            };
-        }
 
         let torso = commands.spawn((
             TransformBundle::from_transform(Transform::from_xyz(0., 5., 0.)),
@@ -76,7 +114,6 @@ fn startup(
         // .limits(JointAxis::AngY, [-90f32.to_radians() , 90f32.to_radians()])
         // .limits(JointAxis::AngZ, [0.                  , 180f32.to_radians()])
 
-        let motor_vel = 90f32.to_radians();
 
         let shld_x_j = RevoluteJointBuilder::new(Vec3::X)
             .local_anchor1(Vec3::Y * (torso_len/2.))
